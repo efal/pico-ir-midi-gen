@@ -1,0 +1,25 @@
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { registerSW } from 'virtual:pwa-register';
+import App from './App';
+
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error("Could not find root element to mount to");
+}
+
+const root = ReactDOM.createRoot(rootElement);
+
+const updateSW = registerSW({
+  onNeedRefresh() {
+    if (confirm('Neue Inhalte verfügbar. Neu laden?')) {
+      updateSW(true);
+    }
+  },
+});
+
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);

@@ -1,0 +1,7 @@
+{
+  "name": "RP2040 IR MIDI Generator-2",
+  "description": "Ein Tool zur Erstellung von Arduino-Code für RP2040-basierte MIDI-Controller, die per Infrarot gesteuert werden. Nutzt die Control Surface Library.",
+  "requestFramePermissions": [
+    "serial"
+  ]
+}
