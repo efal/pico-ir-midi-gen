@@ -1,8 +1,21 @@
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const getGenAI = () => {
+  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  try {
+    return new GoogleGenAI({ apiKey });
+  } catch (e) {
+    console.error("Failed to initialize GoogleGenAI", e);
+    return null;
+  }
+};
 
 export const askGemini = async (prompt: string, contextCode: string): Promise<string> => {
+  const genAI = getGenAI();
+  if (!genAI) {
+    return "AI Assistent ist nicht konfiguriert (API Key fehlt).";
+  }
   try {
     const fullPrompt = `
       Du bist ein Experte für Arduino, C++ und MIDI.
@@ -21,9 +34,9 @@ export const askGemini = async (prompt: string, contextCode: string): Promise<st
       Bitte antworte kurz, präzise und hilfreich auf Deutsch. Wenn Code-Änderungen nötig sind, erkläre sie.
     `;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: fullPrompt,
+    const response = await genAI.models.generateContent({
+      model: 'gemini-1.5-flash',
+      contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
     });
 
     return response.text || "Entschuldigung, ich konnte keine Antwort generieren.";
