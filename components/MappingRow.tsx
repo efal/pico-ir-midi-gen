@@ -1,5 +1,5 @@
 import React from 'react';
-import { Mapping, MidiType } from '../types';
+import { Mapping, MidiType, IrProtocol } from '../types';
 import { Trash2, Radio } from 'lucide-react';
 import VdjActionInput from './VdjActionInput';
 
@@ -16,25 +16,34 @@ const MappingRow: React.FC<Props> = ({ mapping, isLearning, onLearn, onChange, o
     <div className={`grid grid-cols-12 gap-2 items-center bg-gray-800 p-3 rounded-md border transition-colors mb-2 ${isLearning ? 'border-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.3)]' : 'border-gray-700 hover:border-blue-500/50'}`}>
       
       {/* IR Code Input with Learn Button */}
-      <div className="col-span-2 flex gap-1">
+      <div className="col-span-3 flex gap-1">
         <div className="flex-1">
-          <label className="text-xs text-gray-400 block mb-1">IR Command</label>
-          <input
-            type="text"
-            value={mapping.irCode}
-            onChange={(e) => {
-              const raw = e.target.value;
-              const withoutPrefix = raw.replace(/^0x/i, '');
-              const hexOnly = withoutPrefix.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
-              if (hexOnly.length > 0) {
-                onChange(mapping.id, 'irCode', '0x' + hexOnly);
-              } else {
-                onChange(mapping.id, 'irCode', '');
-              }
-            }}
-            placeholder="z.B. 0x45"
-            className={`w-full bg-gray-900 border rounded px-2 py-1 text-sm font-mono focus:outline-none focus:border-blue-500 ${isLearning ? 'border-orange-500 text-orange-400' : 'border-gray-600 text-green-400'}`}
-          />
+          <label className="text-xs text-gray-400 block mb-1">IR Command & Protocol</label>
+          <div className="flex gap-1">
+            <select
+              value={mapping.irProtocol}
+              onChange={(e) => onChange(mapping.id, 'irProtocol', e.target.value as IrProtocol)}
+              className="bg-gray-900 border border-gray-600 rounded px-1 py-1 text-[10px] text-orange-400 focus:outline-none focus:border-blue-500"
+            >
+              {Object.values(IrProtocol).map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <input
+              type="text"
+              value={mapping.irCode}
+              onChange={(e) => {
+                const raw = e.target.value;
+                const withoutPrefix = raw.replace(/^0x/i, '');
+                const hexOnly = withoutPrefix.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+                if (hexOnly.length > 0) {
+                  onChange(mapping.id, 'irCode', '0x' + hexOnly);
+                } else {
+                  onChange(mapping.id, 'irCode', '');
+                }
+              }}
+              placeholder="0x45"
+              className={`flex-1 bg-gray-900 border rounded px-2 py-1 text-sm font-mono focus:outline-none focus:border-blue-500 ${isLearning ? 'border-orange-500 text-orange-400' : 'border-gray-600 text-green-400'}`}
+            />
+          </div>
         </div>
         <div className="flex items-end pb-[1px]">
           <button
@@ -110,7 +119,7 @@ const MappingRow: React.FC<Props> = ({ mapping, isLearning, onLearn, onChange, o
       </div>
 
       {/* VDJ Action */}
-      <div className="col-span-4">
+      <div className="col-span-3">
         <label className="text-xs text-gray-400 block mb-1">VirtualDJ Action</label>
         <VdjActionInput
           value={mapping.vdjAction || ''}

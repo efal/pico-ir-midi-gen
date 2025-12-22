@@ -1,29 +1,42 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mapping, ButtonMapping, FaderMapping, KeypadMapping, MidiType, GeneratorConfig } from './types';
+import { Mapping, ButtonMapping, FaderMapping, KeypadMapping, EncoderMapping, MidiType, IrProtocol, GeneratorConfig } from './types';
 import { generateArduinoCode } from './services/codeGenerator';
 import { generateVdjXml } from './services/vdjGenerator';
 import MappingRow from './components/MappingRow';
 import ButtonRow from './components/ButtonRow';
 import FaderRow from './components/FaderRow';
 import KeypadRow from './components/KeypadRow';
+import EncoderRow from './components/EncoderRow';
+import DisplayView from './components/DisplayView';
 import Assistant from './components/Assistant';
-import { Plus, Download, Copy, Code2, Cpu, Settings, Bot, AlertTriangle, Plug, Unplug, Radio, CircleDot, Sliders, Grid3X3, FileCode, Info } from 'lucide-react';
+import { Plus, Download, Copy, Code2, Cpu, Settings, Bot, AlertTriangle, Plug, Unplug, Radio, CircleDot, Sliders, Grid3X3, FileCode, Info, RotateCw, Monitor } from 'lucide-react';
 
 const App: React.FC = () => {
   // State
   const [config, setConfig] = useState<GeneratorConfig>({
     irPin: 15,
     useLedFeedback: true,
-    controllerName: 'MyRP2040Controller'
+    controllerName: 'MyRP2040Controller',
+    display: {
+      enabled: false,
+      sdaPin: 4,
+      sclPin: 5,
+      i2cAddress: '0x3C',
+      showIrLog: true,
+      showMidiLog: true,
+      inverted: false,
+      deckMode: true
+    }
   });
 
   // Data Models
   const [mappings, setMappings] = useState<Mapping[]>([
-    { id: '1', irCode: '0x45', midiType: MidiType.NOTE_ON, channel: 1, data1: 60, data2: 127, vdjAction: 'play_pause' },
+    { id: '1', irCode: '0x45', irProtocol: IrProtocol.NEC, midiType: MidiType.NOTE_ON, channel: 1, data1: 60, data2: 127, vdjAction: 'play_pause' },
   ]);
 
   const [buttons, setButtons] = useState<ButtonMapping[]>([]);
   const [faders, setFaders] = useState<FaderMapping[]>([]);
+  const [encoders, setEncoders] = useState<EncoderMapping[]>([]);
   const [keypads, setKeypads] = useState<KeypadMapping[]>([]);
 
   const [generatedCode, setGeneratedCode] = useState('');
@@ -31,268 +44,95 @@ const App: React.FC = () => {
   
   // UI State
   const [activeRightTab, setActiveRightTab] = useState<'code' | 'xml' | 'assistant'>('code');
-  const [activeView, setActiveView] = useState<'ir' | 'buttons' | 'faders' | 'keypad'>('ir');
+  const [activeView, setActiveView] = useState<'ir' | 'buttons' | 'faders' | 'encoders' | 'keypad' | 'display'>('ir');
 
   // Serial & Learning State
   const [isSerialConnected, setIsSerialConnected] = useState(false);
   const [learningId, setLearningId] = useState<string | null>(null);
   
-  // Refs for Serial API management
   const portRef = useRef<any>(null);
   const readerRef = useRef<ReadableStreamDefaultReader | null>(null);
   const readableStreamClosedRef = useRef<Promise<void> | null>(null);
   const keepReadingRef = useRef(false);
-
-  // Refs for accessing latest state inside async loops
   const mappingsRef = useRef(mappings);
   const learningIdRef = useRef(learningId);
 
-  // Sync refs with state
-  useEffect(() => {
-    mappingsRef.current = mappings;
-  }, [mappings]);
+  useEffect(() => { mappingsRef.current = mappings; }, [mappings]);
+  useEffect(() => { learningIdRef.current = learningId; }, [learningId]);
 
   useEffect(() => {
-    learningIdRef.current = learningId;
-  }, [learningId]);
-
-  // Effect to update code
-  useEffect(() => {
-    const code = generateArduinoCode(mappings, buttons, faders, keypads, config);
-    const xml = generateVdjXml(mappings, buttons, faders, keypads, config);
+    const code = generateArduinoCode(mappings, buttons, faders, keypads, config, encoders);
+    const xml = generateVdjXml(mappings, buttons, faders, keypads, config, encoders);
     setGeneratedCode(code);
     setGeneratedXml(xml);
-  }, [mappings, buttons, faders, keypads, config]);
+  }, [mappings, buttons, faders, keypads, encoders, config]);
 
-  // Serial Connection Logic
   const connectSerial = async () => {
-    if (!('serial' in navigator)) {
-      alert('Dein Browser unterstützt keine Web Serial API. Bitte nutze Chrome oder Edge.');
-      return;
-    }
-
+    if (!('serial' in navigator)) return;
     try {
       const port = await (navigator as any).serial.requestPort();
       await port.open({ baudRate: 115200 });
       portRef.current = port;
       setIsSerialConnected(true);
-      
-      // Start reading loop
       readSerialLoop(port);
-    } catch (err) {
-      console.error('Serial Connection Failed:', err);
-      alert('Verbindungsfehler: ' + (err as Error).message + '\n\nStelle sicher, dass du die Berechtigung erteilst und der Controller angeschlossen ist.');
-    }
+    } catch (err) { console.error(err); }
   };
 
   const disconnectSerial = async () => {
     keepReadingRef.current = false;
-    
-    // 1. Cancel the reader to break the loop
-    if (readerRef.current) {
-      try {
-        await readerRef.current.cancel();
-      } catch (e) {
-        console.warn("Reader cancel warning:", e);
-      }
-      readerRef.current = null;
-    }
-
-    // 2. Wait for the stream pipe to close
-    if (readableStreamClosedRef.current) {
-      try {
-        await readableStreamClosedRef.current;
-      } catch (e) {
-        // Ignore errors from stream cancellation
-      }
-      readableStreamClosedRef.current = null;
-    }
-
-    // 3. Close the port
-    if (portRef.current) {
-      try {
-        await portRef.current.close();
-      } catch (e) {
-        console.error("Port close error:", e);
-      }
-      portRef.current = null;
-    }
-
+    if (readerRef.current) await readerRef.current.cancel();
+    if (portRef.current) await portRef.current.close();
     setIsSerialConnected(false);
     setLearningId(null);
   };
 
   const readSerialLoop = async (port: any) => {
     const textDecoder = new TextDecoderStream();
-    // Store the closed promise to await it during disconnect
     readableStreamClosedRef.current = port.readable.pipeTo(textDecoder.writable);
-    
     const reader = textDecoder.readable.getReader();
     readerRef.current = reader;
     keepReadingRef.current = true;
-
     let buffer = '';
-
     try {
       while (keepReadingRef.current) {
         const { value, done } = await reader.read();
-        if (done) {
-          break; // Stream closed
-        }
+        if (done) break;
         if (value) {
           buffer += value;
           const lines = buffer.split('\n');
           buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            processSerialLine(line.trim());
-          }
+          for (const line of lines) processSerialLine(line.trim());
         }
       }
-    } catch (error) {
-      console.error('Read Loop Error', error);
-    } finally {
-      // Release lock so pipeTo can resolve/reject
-      try {
-        reader.releaseLock();
-      } catch (e) {
-        // Ignore if already released
-      }
-    }
+    } catch (e) {} finally { reader.releaseLock(); }
   };
 
-  // Process line using Refs to get fresh state
   const processSerialLine = (line: string) => {
-    const match = line.match(/IR Code:\s*(0x[0-9A-Fa-f]+)/);
-    
-    if (match && match[1]) {
-      const detectedCode = match[1];
-      const currentLearningId = learningIdRef.current;
-
-      if (currentLearningId && activeView === 'ir') {
-        const currentMappings = mappingsRef.current;
-        const currentIndex = currentMappings.findIndex(m => m.id === currentLearningId);
-
-        if (currentIndex !== -1) {
-          // Update the found mapping
-          const updatedMappings = [...currentMappings];
-          updatedMappings[currentIndex] = {
-            ...updatedMappings[currentIndex],
-            irCode: detectedCode
-          };
-          
-          setMappings(updatedMappings);
-
-          // Advance to next mapping if available
-          const nextIndex = currentIndex + 1;
-          if (nextIndex < currentMappings.length) {
-            setLearningId(currentMappings[nextIndex].id);
-          } else {
-            // End of list
-            setLearningId(null);
-          }
-        }
+    const match = line.match(/Protocol:\s*(\w+)\s*Code:\s*(0x[0-9A-Fa-f]+)/);
+    if (match && learningIdRef.current && activeView === 'ir') {
+      const detectedProtocol = match[1].toUpperCase();
+      const detectedCode = match[2];
+      const currentMappings = mappingsRef.current;
+      const currentIndex = currentMappings.findIndex(m => m.id === learningIdRef.current);
+      if (currentIndex !== -1) {
+        let p = IrProtocol.NEC;
+        if (detectedProtocol.includes('SONY')) p = IrProtocol.SONY;
+        else if (detectedProtocol.includes('RC5')) p = IrProtocol.RC5;
+        const updated = [...currentMappings];
+        updated[currentIndex] = { ...updated[currentIndex], irCode: detectedCode, irProtocol: p };
+        setMappings(updated);
+        const next = currentIndex + 1;
+        setLearningId(next < currentMappings.length ? currentMappings[next].id : null);
       }
     }
   };
 
-  // --- Handlers ---
-  const addMapping = () => {
-    const newMapping: Mapping = {
-      id: Date.now().toString(),
-      irCode: '',
-      midiType: MidiType.NOTE_ON,
-      channel: 1,
-      data1: 60,
-      data2: 127
-    };
-    setMappings([...mappings, newMapping]);
+  const updateConfig = (field: string, value: any) => {
+    setConfig(prev => ({ ...prev, [field]: value }));
   };
 
-  const updateMapping = (id: string, field: keyof Mapping, value: any) => {
-    setMappings(prev => prev.map(m => m.id === id ? { ...m, [field]: value } : m));
-  };
-
-  const deleteMapping = (id: string) => {
-    setMappings(mappings.filter(m => m.id !== id));
-  };
-
-  const toggleLearning = (id: string) => {
-    if (!isSerialConnected) {
-      alert("Bitte verbinde zuerst den Controller über USB (Klicke oben auf 'Verbinden').");
-      connectSerial();
-      return;
-    }
-    if (learningId === id) {
-      setLearningId(null); 
-    } else {
-      setLearningId(id);
-    }
-  };
-
-  const addButton = () => {
-    const newBtn: ButtonMapping = {
-      id: Date.now().toString(),
-      name: `Button ${buttons.length + 1}`,
-      pin: 0,
-      midiType: MidiType.NOTE_ON,
-      channel: 1,
-      data1: 60
-    };
-    setButtons([...buttons, newBtn]);
-  };
-
-  const updateButton = (id: string, field: keyof ButtonMapping, value: any) => {
-    setButtons(prev => prev.map(b => b.id === id ? { ...b, [field]: value } : b));
-  };
-
-  const deleteButton = (id: string) => {
-    setButtons(buttons.filter(b => b.id !== id));
-  };
-
-  const addFader = () => {
-    const newFader: FaderMapping = {
-      id: Date.now().toString(),
-      name: `Fader ${faders.length + 1}`,
-      pin: 26, 
-      channel: 1,
-      ccNumber: 1
-    };
-    setFaders([...faders, newFader]);
-  };
-
-  const updateFader = (id: string, field: keyof FaderMapping, value: any) => {
-    setFaders(prev => prev.map(f => f.id === id ? { ...f, [field]: value } : f));
-  };
-
-  const deleteFader = (id: string) => {
-    setFaders(faders.filter(f => f.id !== id));
-  };
-
-  const addKeypad = () => {
-    const newKeypad: KeypadMapping = {
-      id: Date.now().toString(),
-      name: `Keypad ${keypads.length + 1}`,
-      mode: MidiType.NOTE_ON,
-      channel: 1,
-      rowPins: [2, 3, 4, 5],
-      colPins: [6, 7, 8, 9],
-      values: [
-        [36, 37, 38, 39],
-        [40, 41, 42, 43],
-        [44, 45, 46, 47],
-        [48, 49, 50, 51]
-      ]
-    };
-    setKeypads([...keypads, newKeypad]);
-  };
-
-  const updateKeypad = (id: string, field: keyof KeypadMapping, value: any) => {
-    setKeypads(prev => prev.map(k => k.id === id ? { ...k, [field]: value } : k));
-  };
-
-  const deleteKeypad = (id: string) => {
-    setKeypads(keypads.filter(k => k.id !== id));
+  const updateDisplayConfig = (field: keyof GeneratorConfig['display'], value: any) => {
+    setConfig(prev => ({ ...prev, display: { ...prev.display, [field]: value } }));
   };
 
   const copyToClipboard = () => {
@@ -318,87 +158,46 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen bg-gray-950 text-gray-200 font-sans overflow-hidden">
-      
-      {/* Sidebar */}
       <aside className="w-80 bg-gray-900 border-r border-gray-800 flex flex-col">
         <div className="p-6 border-b border-gray-800">
-          <h1 className="text-xl font-bold flex items-center gap-2 text-blue-400">
-            <Cpu /> RP2040 Controller
-          </h1>
+          <h1 className="text-xl font-bold flex items-center gap-2 text-blue-400"><Cpu /> RP2040 Controller</h1>
           <p className="text-xs text-gray-500 mt-1">MIDI Generator Tool</p>
         </div>
-
         <div className="p-6 space-y-6 flex-1 overflow-y-auto">
           <div>
-            <h2 className="text-sm font-semibold uppercase text-gray-500 tracking-wider mb-3 flex items-center gap-2">
-              <Settings size={14} /> Global Settings
-            </h2>
-            
+            <h2 className="text-sm font-semibold uppercase text-gray-500 tracking-wider mb-3 flex items-center gap-2"><Settings size={14} /> Global Settings</h2>
             <div className="space-y-4">
+              <input type="text" value={config.controllerName} onChange={(e) => updateConfig('controllerName', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm" placeholder="Controller Name"/>
               <div>
-                <label className="block text-sm mb-1 text-gray-300">Projekt Name</label>
-                <input 
-                  type="text" 
-                  value={config.controllerName}
-                  onChange={(e) => setConfig({...config, controllerName: e.target.value})}
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-                />
+                <label className="block text-xs text-gray-400 mb-1">IR Receiver Pin</label>
+                <input type="number" value={config.irPin} onChange={(e) => updateConfig('irPin', parseInt(e.target.value))} className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"/>
               </div>
-
-              <div>
-                <label className="block text-sm mb-1 text-gray-300">IR Empfänger Pin (GPIO)</label>
-                <input 
-                  type="number" 
-                  value={config.irPin}
-                  onChange={(e) => setConfig({...config, irPin: parseInt(e.target.value)})}
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-                />
-              </div>
-
               <div className="flex items-center gap-2">
-                <input 
-                  type="checkbox" 
-                  id="led"
-                  checked={config.useLedFeedback}
-                  onChange={(e) => setConfig({...config, useLedFeedback: e.target.checked})}
-                  className="rounded bg-gray-800 border-gray-700 text-blue-500"
-                />
-                <label htmlFor="led" className="text-sm text-gray-300 cursor-pointer">Onboard LED Feedback</label>
+                <input type="checkbox" id="led" checked={config.useLedFeedback} onChange={(e) => updateConfig('useLedFeedback', e.target.checked)}/>
+                <label htmlFor="led" className="text-sm text-gray-300">LED Feedback</label>
               </div>
             </div>
           </div>
-
-          <div className="p-4 bg-orange-900/20 border border-orange-900/50 rounded text-xs text-orange-200">
-            <div className="flex items-center gap-2 mb-2 font-bold text-orange-400">
-               <AlertTriangle size={14} /> Setup-Infos
+          <div className="p-4 bg-blue-900/20 border border-blue-900/50 rounded text-xs">
+            <div className="font-bold text-blue-400 flex items-center gap-2 mb-2"><Monitor size={14}/> I2C (OLED) Pins</div>
+            <div className="grid grid-cols-2 gap-2">
+              <div><label className="text-gray-500 block text-[10px] uppercase">SDA</label><input type="number" value={config.display.sdaPin} onChange={e => updateDisplayConfig('sdaPin', parseInt(e.target.value))} className="w-full bg-black/30 p-1 rounded text-center"/></div>
+              <div><label className="text-gray-500 block text-[10px] uppercase">SCL</label><input type="number" value={config.display.sclPin} onChange={e => updateDisplayConfig('sclPin', parseInt(e.target.value))} className="w-full bg-black/30 p-1 rounded text-center"/></div>
             </div>
-            <ul className="list-disc pl-4 space-y-1 text-orange-100/90">
-              <li>Core: <strong>"Earle F. Philhower"</strong>.</li>
-              <li>USB Stack: <strong>"Adafruit TinyUSB"</strong>.</li>
-            </ul>
           </div>
         </div>
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
-        
         <header className="h-16 border-b border-gray-800 flex items-center justify-between px-6 bg-gray-900/50 backdrop-blur-sm">
-          <div className="flex bg-gray-800 rounded-lg p-1">
-            <button onClick={() => setActiveView('ir')} className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${activeView === 'ir' ? 'bg-gray-700 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>
-              <Radio size={16} /> IR
-            </button>
-            <button onClick={() => setActiveView('buttons')} className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${activeView === 'buttons' ? 'bg-gray-700 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>
-              <CircleDot size={16} /> Buttons
-            </button>
-            <button onClick={() => setActiveView('faders')} className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${activeView === 'faders' ? 'bg-gray-700 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>
-              <Sliders size={16} /> Fader
-            </button>
-            <button onClick={() => setActiveView('keypad')} className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${activeView === 'keypad' ? 'bg-gray-700 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>
-              <Grid3X3 size={16} /> Keypad
-            </button>
+          <div className="flex bg-gray-800 rounded-lg p-1 overflow-x-auto">
+            <button onClick={() => setActiveView('ir')} className={`px-3 py-1.5 rounded-md text-xs flex items-center gap-2 transition-all ${activeView === 'ir' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200'}`}><Radio size={14}/>IR</button>
+            <button onClick={() => setActiveView('buttons')} className={`px-3 py-1.5 rounded-md text-xs flex items-center gap-2 transition-all ${activeView === 'buttons' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200'}`}><CircleDot size={14}/>Buttons</button>
+            <button onClick={() => setActiveView('faders')} className={`px-3 py-1.5 rounded-md text-xs flex items-center gap-2 transition-all ${activeView === 'faders' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200'}`}><Sliders size={14}/>Fader</button>
+            <button onClick={() => setActiveView('encoders')} className={`px-3 py-1.5 rounded-md text-xs flex items-center gap-2 transition-all ${activeView === 'encoders' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200'}`}><RotateCw size={14}/>Encoder</button>
+            <button onClick={() => setActiveView('keypad')} className={`px-3 py-1.5 rounded-md text-xs flex items-center gap-2 transition-all ${activeView === 'keypad' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200'}`}><Grid3X3 size={14}/>Keypad</button>
+            <button onClick={() => setActiveView('display')} className={`px-3 py-1.5 rounded-md text-xs flex items-center gap-2 transition-all ${activeView === 'display' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200'}`}><Monitor size={14}/>Display</button>
           </div>
-
           <div className="flex items-center gap-4">
              {activeView === 'ir' && (
                 !isSerialConnected ? (
@@ -413,42 +212,37 @@ const App: React.FC = () => {
              )}
 
             <button onClick={() => {
-                if (activeView === 'ir') addMapping();
-                if (activeView === 'buttons') addButton();
-                if (activeView === 'faders') addFader();
-                if (activeView === 'keypad') addKeypad();
-              }} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-md text-sm font-medium">
-              <Plus size={18} /> Hinzufügen
+              if(activeView==='ir') setMappings([...mappings, {id:Date.now().toString(), irCode:'', irProtocol:IrProtocol.NEC, midiType:MidiType.NOTE_ON, channel:1, data1:60, data2:127}]);
+              if(activeView==='buttons') setButtons([...buttons, {id:Date.now().toString(), name: `Button ${buttons.length + 1}`, pin: 0, midiType: MidiType.NOTE_ON, channel: 1, data1: 60}]);
+              if(activeView==='faders') setFaders([...faders, {id:Date.now().toString(), name: `Fader ${faders.length + 1}`, pin: 26, channel: 1, ccNumber: 1}]);
+              if(activeView==='encoders') setEncoders([...encoders, {id:Date.now().toString(), name:'New Encoder', pinA:10, pinB:11, channel:1, ccNumber:20, multiplier:1}]);
+              if(activeView==='keypad') setKeypads([...keypads, {id:Date.now().toString(), name: `Keypad ${keypads.length + 1}`, mode: MidiType.NOTE_ON, channel: 1, rowPins: [2, 3, 4, 5], colPins: [6, 7, 8, 9], values: [[36, 37, 38, 39],[40, 41, 42, 43],[44, 45, 46, 47],[48, 49, 50, 51]], vdjActions: Array(4).fill(0).map(() => Array(4).fill(''))}]);
+            }} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm transition-colors shadow-lg flex items-center gap-2">
+              <Plus size={16}/> Hinzufügen
             </button>
           </div>
         </header>
 
         <div className="flex-1 flex overflow-hidden">
           <div className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
-            {activeView === 'ir' && mappings.map(m => (
-              <MappingRow key={m.id} mapping={m} isLearning={learningId === m.id} onLearn={toggleLearning} onChange={updateMapping} onDelete={deleteMapping} />
-            ))}
-            {activeView === 'buttons' && buttons.map(b => (
-              <ButtonRow key={b.id} mapping={b} onChange={updateButton} onDelete={deleteButton} />
-            ))}
-            {activeView === 'faders' && faders.map(f => (
-              <FaderRow key={f.id} mapping={f} onChange={updateFader} onDelete={deleteFader} />
-            ))}
-            {activeView === 'keypad' && keypads.map(k => (
-              <KeypadRow key={k.id} mapping={k} onChange={updateKeypad} onDelete={deleteKeypad} />
-            ))}
+            {activeView === 'ir' && mappings.map(m => <MappingRow key={m.id} mapping={m} isLearning={learningId===m.id} onLearn={id => setLearningId(id)} onChange={(id,f,v)=>setMappings(mappings.map(x=>x.id===id?{...x,[f]:v}:x))} onDelete={id=>setMappings(mappings.filter(x=>x.id!==id))}/>)}
+            {activeView === 'buttons' && buttons.map(b => <ButtonRow key={b.id} mapping={b} onChange={(id,f,v)=>setButtons(buttons.map(x=>x.id===id?{...x,[f]:v}:x))} onDelete={id=>setButtons(buttons.filter(x=>x.id!==id))}/>)}
+            {activeView === 'faders' && faders.map(f => <FaderRow key={f.id} mapping={f} onChange={(id,f,v)=>setFaders(faders.map(x=>x.id===id?{...x,[f]:v}:x))} onDelete={id=>setFaders(faders.filter(x=>x.id!==id))}/>)}
+            {activeView === 'encoders' && encoders.map(e => <EncoderRow key={e.id} mapping={e} onChange={(id,f,v)=>setEncoders(encoders.map(x=>x.id===id?{...x,[f]:v}:x))} onDelete={id=>setEncoders(encoders.filter(x=>x.id!==id))}/>)}
+            {activeView === 'keypad' && keypads.map(k => <KeypadRow key={k.id} mapping={k} onChange={(id,f,v)=>setKeypads(keypads.map(x=>x.id===id?{...x,[f]:v}:x))} onDelete={id=>setKeypads(keypads.filter(x=>x.id!==id))}/>)}
+            {activeView === 'display' && <DisplayView config={config.display} onChange={updateDisplayConfig} />}
           </div>
 
           {/* Right Panel */}
-          <div className="w-[500px] border-l border-gray-800 bg-gray-900 flex flex-col">
+          <div className="w-[500px] border-l border-gray-800 bg-gray-900 flex flex-col shadow-2xl">
             <div className="flex border-b border-gray-800">
-              <button onClick={() => setActiveRightTab('code')} className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 ${activeRightTab === 'code' ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50' : 'text-gray-500 hover:text-gray-300'}`}>
+              <button onClick={() => setActiveRightTab('code')} className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 transition-all ${activeRightTab === 'code' ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50' : 'text-gray-500 hover:text-gray-300'}`}>
                 <Code2 size={16} /> Arduino
               </button>
-              <button onClick={() => setActiveRightTab('xml')} className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 ${activeRightTab === 'xml' ? 'text-orange-400 border-b-2 border-orange-400 bg-gray-800/50' : 'text-gray-500 hover:text-gray-300'}`}>
+              <button onClick={() => setActiveRightTab('xml')} className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 transition-all ${activeRightTab === 'xml' ? 'text-orange-400 border-b-2 border-orange-400 bg-gray-800/50' : 'text-gray-500 hover:text-gray-300'}`}>
                 <FileCode size={16} /> VirtualDJ
               </button>
-              <button onClick={() => setActiveRightTab('assistant')} className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 ${activeRightTab === 'assistant' ? 'text-purple-400 border-b-2 border-purple-400 bg-gray-800/50' : 'text-gray-500 hover:text-gray-300'}`}>
+              <button onClick={() => setActiveRightTab('assistant')} className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 transition-all ${activeRightTab === 'assistant' ? 'text-purple-400 border-b-2 border-purple-400 bg-gray-800/50' : 'text-gray-500 hover:text-gray-300'}`}>
                 <Bot size={16} /> AI Hilfe
               </button>
             </div>
@@ -460,23 +254,8 @@ const App: React.FC = () => {
                 </div>
               ) : (
                 <div className="h-full flex flex-col">
-                   {/* Instruction Box for VirtualDJ */}
-                   {activeRightTab === 'xml' && (
-                     <div className="m-4 p-3 bg-blue-900/20 border border-blue-800 rounded text-[11px] text-blue-200 space-y-2">
-                       <div className="flex items-center gap-2 font-bold text-blue-400">
-                         <Info size={14} /> VDJ Installation Guide
-                       </div>
-                       <p>Kopiere die heruntergeladene XML-Datei in diesen Ordner:</p>
-                       <div className="font-mono bg-black/40 p-2 rounded select-all break-all">
-                         Windows: Documents\VirtualDJ\Mappers<br/>
-                         macOS: Documents/VirtualDJ/Mappers
-                       </div>
-                       <p>Wähle danach den Controller in den VirtualDJ-Einstellungen aus.</p>
-                     </div>
-                   )}
-
                    <div className="flex-1 overflow-auto p-4 bg-[#1e1e1e] scrollbar-thin">
-                    <pre className="text-xs font-mono text-gray-300 leading-relaxed whitespace-pre font-ligatures">
+                    <pre className="text-[10px] font-mono text-gray-400 leading-relaxed whitespace-pre font-ligatures">
                       {activeRightTab === 'xml' ? generatedXml : generatedCode}
                     </pre>
                    </div>
@@ -485,7 +264,7 @@ const App: React.FC = () => {
                        <Copy size={16} /> Kopieren
                      </button>
                      <button onClick={downloadFile} className={`flex-1 flex items-center justify-center gap-2 text-white py-2 rounded text-sm transition-colors ${activeRightTab === 'xml' ? 'bg-orange-700 hover:bg-orange-600' : 'bg-green-700 hover:bg-green-600'}`}>
-                       <Download size={16} /> {activeRightTab === 'xml' ? '.xml Download' : '.ino Download'}
+                       <Download size={16} /> Herunterladen
                      </button>
                    </div>
                 </div>

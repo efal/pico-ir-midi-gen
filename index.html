@@ -1,68 +1,45 @@
 <!DOCTYPE html>
 <html lang="de">
-
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RP2040 IR MIDI Generator</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            gray: {
-              900: '#111827',
-              800: '#1f2937',
-              700: '#374151',
-              600: '#4b5563',
-            },
-            primary: {
-              500: '#3b82f6',
-              600: '#2563eb',
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RP2040 IR MIDI Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              gray: {
+                900: '#111827',
+                800: '#1f2937',
+                700: '#374151',
+                600: '#4b5563',
+              },
+              primary: {
+                500: '#3b82f6',
+                600: '#2563eb',
+              }
             }
           }
         }
       }
-    }
-  </script>
-  <link rel="icon" href="/icon-192.png" />
-  <meta name="theme-color" content="#111827" />
-  <script>
-    // Absolute fallback error reporting
-    window.onerror = function (msg, url, line, col, error) {
-      var body = document.body;
-      if (body) {
-        var errDiv = document.createElement('div');
-        errDiv.style = "position:fixed;top:0;left:0;width:100%;height:100%;background:#a00;color:#fff;padding:20px;z-index:99999;overflow:auto;font-family:monospace";
-        errDiv.innerHTML = '<h1>Global Error Caught</h1>' +
-          '<p><b>Message:</b> ' + msg + '</p>' +
-          '<p><b>URL:</b> ' + url + '</p>' +
-          '<p><b>Line:</b> ' + line + ', <b>Col:</b> ' + col + '</p>' +
-          '<pre>' + (error && error.stack ? error.stack : 'No stack trace') + '</pre>';
-        body.appendChild(errDiv);
-      }
-      return false;
-    };
-
-    // Global unhandled rejection handler
-    window.onunhandledrejection = function (event) {
-      console.error('Unhandled rejection:', event.reason);
-      // Optional: show in same div
-    };
-
-    window.process = window.process || {
-      env: {
-        NODE_ENV: 'production'
-      }
-    };
-    window.global = window;
-  </script>
+    </script>
+  <script type="importmap">
+{
+  "imports": {
+    "lucide-react": "https://esm.sh/lucide-react@^0.561.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "@google/genai": "https://esm.sh/@google/genai@^1.34.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
 </head>
-
-<body class="bg-gray-950 text-gray-100 antialiased h-screen overflow-hidden selection:bg-blue-500 selection:text-white">
-  <div id="root" class="h-full flex flex-col"></div>
-  <script type="module" src="/index.tsx"></script>
-</body>
-
+  <body class="bg-gray-950 text-gray-100 antialiased h-screen overflow-hidden selection:bg-blue-500 selection:text-white">
+    <div id="root" class="h-full flex flex-col"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
 </html>

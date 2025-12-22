@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { KeypadMapping, MidiType } from '../types';
-import { Trash2, Grid3X3 } from 'lucide-react';
+import { Trash2, Grid3X3, Music, FileCode } from 'lucide-react';
+import VdjActionInput from './VdjActionInput';
 
 interface Props {
   mapping: KeypadMapping;
@@ -9,11 +10,18 @@ interface Props {
 }
 
 const KeypadRow: React.FC<Props> = ({ mapping, onChange, onDelete }) => {
-  
+  const [viewMode, setViewMode] = useState<'midi' | 'vdj'>('midi');
+
   const updateMatrixValue = (rowIdx: number, colIdx: number, value: number) => {
     const newValues = mapping.values.map(row => [...row]);
     newValues[rowIdx][colIdx] = value;
     onChange(mapping.id, 'values', newValues);
+  };
+
+  const updateVdjAction = (rowIdx: number, colIdx: number, value: string) => {
+    const newActions = (mapping.vdjActions || Array(4).fill(0).map(() => Array(4).fill(''))).map(row => [...row]);
+    newActions[rowIdx][colIdx] = value;
+    onChange(mapping.id, 'vdjActions', newActions);
   };
 
   const updatePin = (type: 'rowPins' | 'colPins', index: number, value: number) => {
@@ -42,7 +50,7 @@ const KeypadRow: React.FC<Props> = ({ mapping, onChange, onDelete }) => {
         </div>
 
         <div className="w-32">
-          <label className="text-xs text-gray-400 block mb-1">Mode</label>
+          <label className="text-xs text-gray-400 block mb-1">MIDI Mode</label>
           <select
             value={mapping.mode}
             onChange={(e) => onChange(mapping.id, 'mode', e.target.value as MidiType)}
@@ -53,15 +61,16 @@ const KeypadRow: React.FC<Props> = ({ mapping, onChange, onDelete }) => {
           </select>
         </div>
 
-        <div className="w-20">
-          <label className="text-xs text-gray-400 block mb-1">Ch</label>
+        <div className="w-24">
+          <label className="text-xs font-bold text-blue-400 block mb-1 uppercase tracking-tighter">MIDI Channel</label>
           <input
             type="number"
             min="1"
             max="16"
             value={mapping.channel}
             onChange={(e) => onChange(mapping.id, 'channel', parseInt(e.target.value))}
-            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-center focus:outline-none focus:border-green-500"
+            className="w-full bg-gray-900 border border-blue-900/50 rounded px-2 py-1 text-sm font-bold text-center text-blue-300 focus:outline-none focus:border-blue-500"
+            title="Eigenständiger MIDI-Kanal für dieses Keypad"
           />
         </div>
 
@@ -88,7 +97,6 @@ const KeypadRow: React.FC<Props> = ({ mapping, onChange, onDelete }) => {
                     className="w-full bg-gray-900 border border-gray-600 rounded px-1 py-1 text-sm text-center focus:outline-none focus:border-green-500"
                     placeholder={`R${idx+1}`}
                    />
-                   <span className="text-[10px] text-gray-500 text-center block mt-1">R{idx+1}</span>
                 </div>
              ))}
            </div>
@@ -105,32 +113,59 @@ const KeypadRow: React.FC<Props> = ({ mapping, onChange, onDelete }) => {
                     className="w-full bg-gray-900 border border-gray-600 rounded px-1 py-1 text-sm text-center focus:outline-none focus:border-green-500"
                     placeholder={`C${idx+1}`}
                    />
-                   <span className="text-[10px] text-gray-500 text-center block mt-1">C{idx+1}</span>
                 </div>
              ))}
            </div>
         </div>
       </div>
 
-      {/* Grid Matrix */}
+      {/* Grid Matrix Toggle */}
+      <div className="flex justify-center mb-3">
+        <div className="bg-gray-900 rounded-lg p-1 flex">
+          <button 
+            onClick={() => setViewMode('midi')}
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-semibold transition-all ${viewMode === 'midi' ? 'bg-gray-700 text-white shadow' : 'text-gray-500 hover:text-gray-300'}`}
+          >
+            <Music size={14} /> MIDI Setup
+          </button>
+          <button 
+            onClick={() => setViewMode('vdj')}
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-semibold transition-all ${viewMode === 'vdj' ? 'bg-gray-700 text-white shadow' : 'text-gray-500 hover:text-gray-300'}`}
+          >
+            <FileCode size={14} /> VDJ Actions
+          </button>
+        </div>
+      </div>
+
+      {/* Grid Matrix View */}
       <div>
-        <label className="text-xs text-gray-400 block mb-2 text-center border-b border-gray-700 pb-1">
-          {mapping.mode === MidiType.CC ? 'CC Nummern Zuordnung (4x4)' : 'Noten Nummern Zuordnung (4x4)'}
-        </label>
         <div className="grid grid-rows-4 gap-2">
           {mapping.values.map((row, rIdx) => (
             <div key={rIdx} className="grid grid-cols-4 gap-2">
               {row.map((val, cIdx) => (
-                <input
-                  key={`${rIdx}-${cIdx}`}
-                  type="number"
-                  min="0"
-                  max="127"
-                  value={val}
-                  onChange={(e) => updateMatrixValue(rIdx, cIdx, parseInt(e.target.value))}
-                  className="bg-gray-900 border border-gray-600 rounded py-2 text-center text-sm focus:outline-none focus:border-green-500 hover:bg-gray-800 transition-colors"
-                  title={`Row ${rIdx+1}, Col ${cIdx+1}`}
-                />
+                viewMode === 'midi' ? (
+                  <div key={`${rIdx}-${cIdx}`} className="relative group">
+                    <input
+                      type="number"
+                      min="0"
+                      max="127"
+                      value={val}
+                      onChange={(e) => updateMatrixValue(rIdx, cIdx, parseInt(e.target.value))}
+                      className="w-full bg-gray-900 border border-gray-600 rounded py-2 text-center text-sm focus:outline-none focus:border-green-500 hover:bg-gray-800 transition-colors"
+                    />
+                    <div className="absolute top-0 right-1 text-[8px] text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {rIdx+1},{cIdx+1}
+                    </div>
+                  </div>
+                ) : (
+                  <VdjActionInput
+                    key={`vdj-${rIdx}-${cIdx}`}
+                    value={(mapping.vdjActions && mapping.vdjActions[rIdx] && mapping.vdjActions[rIdx][cIdx]) || ''}
+                    onChange={(val) => updateVdjAction(rIdx, cIdx, val)}
+                    placeholder="..."
+                    className="w-full bg-gray-900 border border-gray-600 rounded py-2 text-center text-[10px] text-blue-200 focus:outline-none focus:border-blue-500 placeholder-gray-800 hover:bg-gray-800 transition-colors"
+                  />
+                )
               ))}
             </div>
           ))}

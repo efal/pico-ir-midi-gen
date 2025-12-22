@@ -1,85 +1,74 @@
-import { Mapping, ButtonMapping, FaderMapping, KeypadMapping, MidiType, GeneratorConfig } from '../types';
+import { Mapping, ButtonMapping, FaderMapping, KeypadMapping, EncoderMapping, MidiType, GeneratorConfig } from '../types';
 
 export const generateVdjXml = (
   irMappings: Mapping[], 
   buttons: ButtonMapping[], 
   faders: FaderMapping[], 
   keypads: KeypadMapping[],
-  config: GeneratorConfig
+  config: GeneratorConfig,
+  encoders: EncoderMapping[] = []
 ): string => {
-  
   const toHex = (num: number) => num.toString(16).toUpperCase().padStart(2, '0');
-
   const getStatusByte = (type: MidiType, channel: number): string => {
-    // Channel is 1-16, MIDI status expects 0-15
     const ch = channel - 1;
-    let base = 0x90; // Default Note On
-
-    switch (type) {
-      case MidiType.NOTE_ON: base = 0x90; break;
-      case MidiType.NOTE_OFF: base = 0x80; break;
-      case MidiType.CC: base = 0xB0; break;
-      case MidiType.PROGRAM_CHANGE: base = 0xC0; break;
-    }
-    
+    let base = 0x90; 
+    if (type === MidiType.CC) base = 0xB0;
     return toHex(base + ch);
   };
 
-  const generateLine = (name: string, type: MidiType, channel: number, data1: number, action?: string) => {
-    const status = getStatusByte(type, channel);
-    const data = toHex(data1);
-    const midiKey = `${status} ${data}`;
-    const script = action && action.trim() !== '' ? action : `/* ${name} */`;
-    
-    return `    <map value="${midiKey}" action="${script}" />`;
-  };
-
   let xmlLines: string[] = [];
+
+  // Encoders
+  if (encoders.length > 0) {
+    xmlLines.push(`    <!-- Rotary Encoders -->`);
+    encoders.forEach(e => {
+      // Rotation mapping
+      const rotStatus = getStatusByte(MidiType.CC, e.channel);
+      const rotData = toHex(e.ccNumber);
+      xmlLines.push(`    <map value="${rotStatus} ${rotData}" action="${e.vdjActionRotate || 'browser_scroll'}" />`);
+      
+      // Button mapping if pin is configured
+      if (e.pinButton !== undefined && e.pinButton !== null) {
+        const btnMidiType = e.buttonMidiType || MidiType.NOTE_ON;
+        const btnData = e.buttonData1 ?? 60;
+        const btnStatus = getStatusByte(btnMidiType, e.channel);
+        xmlLines.push(`    <map value="${btnStatus} ${toHex(btnData)}" action="${e.vdjActionClick || 'browser_enter'}" />`);
+      }
+    });
+  }
 
   // IR Mappings
   if (irMappings.length > 0) {
     xmlLines.push(`    <!-- IR Remote Mappings -->`);
     irMappings.forEach(m => {
-      xmlLines.push(generateLine(`IR ${m.irCode}`, m.midiType, m.channel, m.data1, m.vdjAction));
+      const status = getStatusByte(m.midiType, m.channel);
+      xmlLines.push(`    <map value="${status} ${toHex(m.data1)}" action="${m.vdjAction || ''}" />`);
     });
   }
 
   // Buttons
   if (buttons.length > 0) {
-    xmlLines.push(`    <!-- Hardware Buttons -->`);
+    xmlLines.push(`    <!-- Physical Buttons -->`);
     buttons.forEach(b => {
-      xmlLines.push(generateLine(b.name, b.midiType, b.channel, b.data1, b.vdjAction));
+      const status = getStatusByte(b.midiType, b.channel);
+      xmlLines.push(`    <map value="${status} ${toHex(b.data1)}" action="${b.vdjAction || ''}" />`);
     });
   }
 
   // Faders
   if (faders.length > 0) {
-    xmlLines.push(`    <!-- Hardware Faders -->`);
+    xmlLines.push(`    <!-- Faders & Pots -->`);
     faders.forEach(f => {
-      xmlLines.push(generateLine(f.name, MidiType.CC, f.channel, f.ccNumber, f.vdjAction));
-    });
-  }
-
-  // Keypads
-  if (keypads.length > 0) {
-    keypads.forEach(k => {
-      xmlLines.push(`    <!-- Keypad: ${k.name} -->`);
-      k.values.forEach((row, rIdx) => {
-        row.forEach((val, cIdx) => {
-          xmlLines.push(generateLine(`${k.name} (${rIdx+1},${cIdx+1})`, k.mode, k.channel, val, ''));
-        });
-      });
+      const status = getStatusByte(MidiType.CC, f.channel);
+      xmlLines.push(`    <map value="${status} ${toHex(f.ccNumber)}" action="${f.vdjAction || ''}" />`);
     });
   }
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <mapper device="${config.controllerName}" author="GeneratedByTool" version="1.0">
-  <info>
-    <name>${config.controllerName}</name>
-    <description>Custom Mapping for RP2040 Controller</description>
-  </info>
-  
+  <info><name>${config.controllerName}</name></info>
+  <mapping>
 ${xmlLines.join('\n')}
-
+  </mapping>
 </mapper>`;
 };

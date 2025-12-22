@@ -1,18 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
 
-const getAI = () => {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
-  if (!apiKey) {
-    return null;
-  }
-  return new GoogleGenAI(apiKey);
-};
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const askGemini = async (prompt: string, contextCode: string): Promise<string> => {
-  const ai = getAI();
-  if (!ai) {
-    return "AI Hilfe ist deaktiviert, da kein API Key konfiguriert wurde.";
-  }
   try {
     const fullPrompt = `
       Du bist ein Experte für Arduino, C++ und MIDI.
@@ -32,7 +22,7 @@ export const askGemini = async (prompt: string, contextCode: string): Promise<st
     `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: fullPrompt,
     });
 
